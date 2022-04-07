@@ -1,0 +1,23 @@
+[package]
+name = "globals"
+version = "0.1.0"
+authors = ["FSoares <fsoares.developer@gmail.com>"]
+edition = "2018"
+description = "Common global helpers"
+license = "Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+backtraces = ["cosmwasm-std/backtraces"]
+#debug-print = ["cosmwasm-std/debug-print"]
+
+[dependencies]
+cosmwasm-schema = { version = "0.16.4", package = "cosmwasm-schema" }
+cosmwasm-std = { version = "0.10", package = "secret-cosmwasm-std" }
+cosmwasm-storage = { version = "0.10", package = "secret-cosmwasm-storage" }
+secret_toolkit  = { version = "0.2.0", package = "secret-toolkit", features = ["permit"]  }
+schemars = "0.7"
+serde = { version = "1.0.103", default-features = false, features = ["derive"] }
+subtle = { version = "2.2.3", default-features = false }
+base64 = "0.12.3"

@@ -1,0 +1,19 @@
+# Build results
+target/
+*.wasm.gz
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# Auto-gen
+.cargo-ok
+
+build/
+
+node_modules/
+artifacts/
+
+scripts/mainnet
+scripts/temp
