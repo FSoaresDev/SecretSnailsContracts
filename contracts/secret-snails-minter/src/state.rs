@@ -5,6 +5,8 @@ use secret_toolkit::serialization::{Bincode2, Serde};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::any::type_name;
 
+use crate::msg::RevenueSplit;
+
 pub const BLOCK_SIZE: usize = 256;
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]
@@ -13,7 +15,7 @@ pub struct SecretContract {
     pub token_code_hash: String,
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, JsonSchema)]
 pub struct Config {
     pub admin: HumanAddr,
     pub token_contract: SecretContract,
@@ -22,6 +24,8 @@ pub struct Config {
     pub standard_mint_enabled: bool,
     pub mint_price: Uint128,
     pub max_mint_per_tx: u16,
+    pub revenue_split: Vec<RevenueSplit>,
+    pub change_metadata_permited_addresses: Vec<HumanAddr>,
 }
 
 /// Returns StdResult<()> resulting from saving an item to storage

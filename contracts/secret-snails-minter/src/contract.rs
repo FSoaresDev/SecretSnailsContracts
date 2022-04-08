@@ -9,8 +9,8 @@ use secret_toolkit::crypto::Prng;
 use secret_toolkit::snip20::{send_msg, transfer_msg};
 
 use crate::msg::{
-    Authentication, Extension, HandleAnswer, MediaFile, Metadata, Mint, NftsHandleMsg, PreLoad,
-    QueryAnswer, ResponseStatus, Trait,
+    Authentication, Extension, HandleAnswer, HandleReceiveMsg, HiddenAttribute, MediaFile,
+    Metadata, Mint, NftsHandleMsg, PreLoad, QueryAnswer, ResponseStatus, Trait,
 };
 use crate::state::{load, may_load, save, SecretContract, BLOCK_SIZE};
 use crate::{
@@ -47,15 +47,15 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
             max_mint_per_tx: msg.max_mint_per_tx.clone(),
             whitelist_mint_enabled: false,
             standard_mint_enabled: false,
+            revenue_split: msg.revenue_split.clone(),
+            change_metadata_permited_addresses: vec![],
         },
     )?;
 
     let prng_seed: Vec<u8> = sha_256(base64::encode(msg.entropy).as_bytes()).to_vec();
     save(&mut deps.storage, PRNG_SEED_KEY, &prng_seed)?;
-
     save(&mut deps.storage, COUNT_KEY, &0)?;
     let mut white_store = PrefixedStorage::new(PREFIX_WHITELIST, &mut deps.storage);
-
     for hum_addr in msg.whitelist.iter() {
         save(&mut white_store, &hum_addr.0.as_bytes(), &false)?;
     }
@@ -78,6 +78,19 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
+        HandleMsg::UpdateMint {
+            whitelist_mint_enabled,
+            standard_mint_enabled,
+            mint_price,
+            max_mint_per_tx,
+        } => update_mint(
+            deps,
+            env,
+            whitelist_mint_enabled,
+            standard_mint_enabled,
+            mint_price,
+            max_mint_per_tx,
+        ),
         HandleMsg::Receive {
             sender,
             from,
@@ -87,8 +100,51 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::AddNftContract { contract } => add_nft_contract(deps, env, contract),
         HandleMsg::LoadMetadata { new_data } => load_metadata(deps, env, new_data),
         HandleMsg::ChangeAdmin { admin } => change_admin(deps, env, admin),
-        _ => Err(StdError::generic_err("action not found!")),
+        HandleMsg::UpdateChangeMetadataPermitedAdresses {
+            change_metadata_permited_addresses,
+        } => {
+            update_change_metadata_permited_addresses(deps, env, change_metadata_permited_addresses)
+        }
     }
+}
+
+pub fn update_mint<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    whitelist_mint_enabled: bool,
+    standard_mint_enabled: bool,
+    mint_price: Option<Uint128>,
+    max_mint_per_tx: Option<u16>,
+) -> StdResult<HandleResponse> {
+    let mut config_store = TypedStoreMut::attach(&mut deps.storage);
+    let mut config: Config = config_store.load(CONFIG_KEY)?;
+
+    if env.message.sender != config.admin {
+        return Err(StdError::generic_err(format!(
+            "Only admin can execute this action!"
+        )));
+    }
+
+    config.whitelist_mint_enabled = whitelist_mint_enabled;
+    config.standard_mint_enabled = standard_mint_enabled;
+
+    if let Some(mint_price) = mint_price {
+        config.mint_price = mint_price
+    }
+
+    if let Some(max_mint_per_tx) = max_mint_per_tx {
+        config.max_mint_per_tx = max_mint_per_tx
+    }
+
+    config_store.store(CONFIG_KEY, &config)?;
+
+    return Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: Some(to_binary(&HandleAnswer::UpdateMint {
+            status: ResponseStatus::Success,
+        })?),
+    });
 }
 
 pub fn add_nft_contract<S: Storage, A: Api, Q: Querier>(
@@ -178,6 +234,35 @@ pub fn change_admin<S: Storage, A: Api, Q: Querier>(
     });
 }
 
+pub fn update_change_metadata_permited_addresses<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    change_metadata_permited_addresses: Vec<HumanAddr>,
+) -> StdResult<HandleResponse> {
+    let mut config_store = TypedStoreMut::attach(&mut deps.storage);
+    let mut config: Config = config_store.load(CONFIG_KEY)?;
+
+    if env.message.sender != config.admin {
+        return Err(StdError::generic_err(format!(
+            "Only admin can execute this action!"
+        )));
+    }
+
+    config.change_metadata_permited_addresses = change_metadata_permited_addresses;
+
+    config_store.store(CONFIG_KEY, &config)?;
+
+    return Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: Some(to_binary(
+            &HandleAnswer::UpdateChangeMetadataPermitedAdresses {
+                status: ResponseStatus::Success,
+            },
+        )?),
+    });
+}
+
 pub fn try_receive<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -187,8 +272,8 @@ pub fn try_receive<S: Storage, A: Api, Q: Querier>(
     msg: Binary,
 ) -> StdResult<HandleResponse> {
     let config = TypedStore::<Config, S>::attach(&deps.storage).load(CONFIG_KEY)?;
-    let msg: HandleMsg = from_binary(&msg)?;
-    if let HandleMsg::MintNfts { count } = msg.clone() {
+    let msg: HandleReceiveMsg = from_binary(&msg)?;
+    if let HandleReceiveMsg::MintNfts { count } = msg.clone() {
         if env.message.sender != config.token_contract.contract_addr {
             return Err(StdError::generic_err(format!("Invalid token sent!")));
         } else {
@@ -235,7 +320,7 @@ pub fn mint_nfts<S: Storage, A: Api, Q: Querier>(
     }
 
     if !config.standard_mint_enabled && !config.whitelist_mint_enabled {
-        return Err(StdError::generic_err(format!("Mint has ended")));
+        return Err(StdError::generic_err(format!("Mint is not enabled!")));
     }
 
     // Check if sent amount is correct
@@ -272,12 +357,18 @@ pub fn mint_nfts<S: Storage, A: Api, Q: Querier>(
 
     let mut mints: Vec<Mint> = vec![];
 
-    for _ in 1..=mint_count {
-        // Pull random token data for minting then remove from data pool
-        let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
-        let random_seed = new_entropy(&env, prng_seed.as_ref(), prng_seed.as_ref());
+    let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
+
+    for index in 1..=mint_count {
+        let random_seed = new_entropy(
+            &env,
+            prng_seed.as_ref(),
+            prng_seed.as_ref(),
+            index.to_string().as_bytes(),
+        );
         let mut rng = ChaChaRng::from_seed(random_seed);
 
+        // Pull random token data for minting then remove from data pool
         let num = (rng.next_u32() % (count as u32)) as u16 + 1; // an id number between 1 and count
 
         let token_data: PreLoad = load(&deps.storage, &num.to_le_bytes())?;
@@ -362,7 +453,11 @@ pub fn mint_nfts<S: Storage, A: Api, Q: Querier>(
             memo: None,
             serial_number: None,
             royalty_info: None,
-            transferable: Some(true),
+            transferable: None,
+            hidden_attributes: Some(vec![HiddenAttribute {
+                name: "speed".to_string(),
+                value: rng.gen_range(1, 101).to_string(),
+            }]),
         });
     }
 
@@ -390,14 +485,15 @@ pub fn mint_nfts<S: Storage, A: Api, Q: Querier>(
     });
 }
 
-pub fn new_entropy(env: &Env, seed: &[u8], entropy: &[u8]) -> [u8; 32] {
+pub fn new_entropy(env: &Env, seed: &[u8], entropy: &[u8], index: &[u8]) -> [u8; 32] {
     // 16 here represents the lengths in bytes of the block height and time.
-    let entropy_len = 16 + env.message.sender.len() + entropy.len();
+    let entropy_len = 16 + env.message.sender.len() + entropy.len() + index.len();
     let mut rng_entropy = Vec::with_capacity(entropy_len);
     rng_entropy.extend_from_slice(&env.block.height.to_be_bytes());
     rng_entropy.extend_from_slice(&env.block.time.to_be_bytes());
     rng_entropy.extend_from_slice(&env.message.sender.0.as_bytes());
     rng_entropy.extend_from_slice(entropy);
+    rng_entropy.extend_from_slice(index);
 
     let mut rng = Prng::new(seed, &rng_entropy);
 

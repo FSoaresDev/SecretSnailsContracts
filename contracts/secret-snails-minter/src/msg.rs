@@ -31,13 +31,15 @@ pub enum HandleMsg {
         amount: Uint128,
         msg: Binary,
     },
-    MintNfts {
-        count: u16,
+    UpdateMint {
+        whitelist_mint_enabled: bool,
+        standard_mint_enabled: bool,
+        mint_price: Option<Uint128>,
+        max_mint_per_tx: Option<u16>,
     },
-    StartWhitelistMint {},
-    EndWhitelistMint {},
-    StartStandardMint {},
-    StopStandardMint {},
+    UpdateChangeMetadataPermitedAdresses {
+        change_metadata_permited_addresses: Vec<HumanAddr>,
+    },
     ChangeAdmin {
         admin: HumanAddr,
     },
@@ -47,6 +49,12 @@ pub enum HandleMsg {
     LoadMetadata {
         new_data: Vec<PreLoad>,
     },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HandleReceiveMsg {
+    MintNfts { count: u16 },
 }
 
 /// Preloaded data storage for the tokens during init
@@ -63,10 +71,10 @@ pub struct PreLoad {
 #[serde(rename_all = "snake_case")]
 pub enum HandleAnswer {
     AddNftContract { status: ResponseStatus },
-    StartMint { status: ResponseStatus },
-    StopMint { status: ResponseStatus },
     MintNfts { status: ResponseStatus },
     ChangeAdmin { status: ResponseStatus },
+    UpdateChangeMetadataPermitedAdresses { status: ResponseStatus },
+    UpdateMint { status: ResponseStatus },
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -155,6 +163,7 @@ pub struct Mint {
     pub transferable: Option<bool>,
     /// optional memo for the tx
     pub memo: Option<String>,
+    pub hidden_attributes: Option<Vec<HiddenAttribute>>,
 }
 
 /// token metadata
@@ -271,4 +280,10 @@ pub struct Royalty {
     pub recipient: HumanAddr,
     /// royalty rate
     pub rate: u16,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+pub struct HiddenAttribute {
+    pub name: String,
+    pub value: String,
 }
